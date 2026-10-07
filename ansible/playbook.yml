@@ -1,0 +1,51 @@
+---
+- name: Configurar servidores do lab
+  hosts: servidores
+  become: true
+
+  vars:
+    pacotes:
+      - curl
+      - git
+      - nginx
+
+  tasks:
+    - name: Atualizar cache do APT
+      ansible.builtin.apt:
+        update_cache: true
+        cache_valid_time: 3600
+
+    - name: Instalar pacotes
+      ansible.builtin.apt:
+        name: "{{pacotes}}"
+        state: present
+    
+    - name: Criar o usuario do pipeline
+      ansible.builtin.user:
+        name: pipeline
+        shell: /bin/bash
+        create_home: true
+        state: present
+
+    - name: Criar diretorio do projeto
+      ansible.builtin.file:
+        path: /opt/datasci
+        state: directory
+        owner: aluno
+        group: aluno
+        mode: "0755"
+
+    - name: Criar pagina de identificacao
+      ansible.builtin.copy:
+       dest: /var/www/html/index.html
+       content: |
+         Servidor configurado automaticamente pelo Ansible.
+         Host: {{ inventory_hostname }}
+       mode: "0644"
+       
+    - name: Garantir que o nginx esteja ativo
+      ansible.builtin.service:
+        name: nginx
+        state: started
+        enabled: true
+
