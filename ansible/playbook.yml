@@ -8,6 +8,8 @@
       - curl
       - git
       - nginx
+      - docker.io
+      - docker-compose-v2
 
   tasks:
     - name: Atualizar cache do APT
@@ -19,6 +21,18 @@
       ansible.builtin.apt:
         name: "{{pacotes}}"
         state: present
+
+    - name: Garantir Docker ativo
+      ansible.builtin.service:
+        name: docker
+        state: started
+        enabled: true
+
+    - name: Adicionar o aluno ao grupo docker
+      ansible.builtin.user:
+        name: aluno
+        groups: docker
+        append: true
     
     - name: Criar o usuario do pipeline
       ansible.builtin.user:
@@ -34,6 +48,24 @@
         owner: aluno
         group: aluno
         mode: "0755"
+      when: inventory_hostname == "devops-1"
+
+    - name: Copiar arquivos da aplicacao
+      ansible.builtin.copy:
+       src: "{{ playbook_dir }}/../app/{{ item }}"
+       dest: "/opt/datasci/{{ item }}"
+       owner: aluno
+       group: aluno
+       mode: "0644"
+      loop:
+       - app.py
+       - coletor.py
+       - Dockerfile
+       - requirements.txt
+       - compose.yaml
+       - .dockerignore
+       - .env
+      when: inventory_hostname == "devops-1"
 
     - name: Criar pagina de identificacao
       ansible.builtin.copy:

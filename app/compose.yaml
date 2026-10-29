@@ -1,0 +1,49 @@
+services:
+
+  simulador:
+    build: .
+    image: datasci-simulador:local
+    ports:
+      - "5000:5000"
+    networks:
+      - rede_dados
+    restart: unless-stopped
+
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; 
+          urllib.request.urlopen('http://localhost:5000/health', timeout=3)"  
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  coletor:
+    image: datasci-simulador:local
+    command: ["python","coletor.py"]
+
+    environment:
+      SIMULADOR_URL: http://simulador:5000/gerar
+      INTERVALO: ${INTERVALO:-5}
+    
+    volumes:
+      - dados_coletados:/dados
+
+    networks:
+      - rede_dados
+    
+    depends_on:
+      simulador:
+        condition: service_healthy
+
+    restart: unless-stopped
+
+  networks:
+    rede_dados:
+      driver: bridge
+
+  volumes:
+    dados_coletados:  
