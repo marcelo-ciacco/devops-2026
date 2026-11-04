@@ -41,9 +41,9 @@ services:
 
     restart: unless-stopped
 
-  networks:
-    rede_dados:
-      driver: bridge
+networks:
+  rede_dados:
+    driver: bridge
 
-  volumes:
-    dados_coletados:  
+volumes:
+  dados_coletados:
