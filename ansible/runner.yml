@@ -1,0 +1,139 @@
+---
+- name: Configurar GitHub Actions Runner na devops-2
+  hosts: devops-2
+  become: true
+
+  vars:
+    runner_user: pipeline
+    runner_dir: /opt/actions-runner
+    runner_name: devops-2
+    runner_version: "2.338.2"
+    runner_sha256: "echo baebf204307bac6193480852732f0aba2ae97b6c5597c244f4d5558390147c40"
+    runner_tarball: "/tmp/actions-runner-linux-x64-{{ runner_version }}.tar.gz"
+
+  pre_tasks:
+    - name: Exigir o repositorio do Github
+      ansible.builtin.assert:
+        that:
+          - github_repo is defined
+          - github_repo | length > 2
+          - "'/' in github_repo"
+        fail_msg: "Informe -e github_repo=USUARIO/REPOSITORIO."
+
+  tasks:
+    - name: Instalar dependencias e Docker na VM2
+      ansible.builtin.apt:
+        name:
+          - ca-certificates
+          - curl
+          - tar
+          - gzip
+          - docker.io
+          - docker-compose-v2
+        state: present
+        update_cache: true
+        cache_valid_time: 3600
+      
+    - name: Garantir Docker ativo e habilitado
+      ansible.builtin.service:
+        name: docker
+        state: started
+        enabled: true
+      
+    - name: Criar ou atualizar usuario do runner
+      ansible.builtin.user:
+        name: "{{ runner_user }}"
+        shell: /bin/bash
+        create_home: true
+        groups: docker
+        append: true
+        state: present
+
+    - name: Criar diretorio do runner
+      ansible.builtin.file:
+        path: "{{ runner_dir }}"
+        state: directory
+        owner: "{{ runner_user }}"
+        group: "{{ runner_user }}"
+        mode: "0755"
+
+    - name: Baixar o runner com verificacao SHA256
+      ansible.builtin.get_url:
+        url: "https://github.com/actions/runner/releases/download/v{{ runner_version }}
+          /actions-runner-linux-x64-{{ runner_version }}.tar.gz"
+        dest: "{{ runner_tarball }}"
+        checkesum: "sha256:{{ runner_sha256 }}"
+        mode: "0644"
+
+    - name: Extrair o runner (apenas na primeira instalacao)
+      ansible.builtin.unarchive:
+        src: "{{ runner_tarball }}"
+        dest: "{{ runner_dir }}"
+        remote_src: true
+        owner: "{{ runner_user }}"
+        group: "{{ runner_user }}"
+        creates: "{{ runner_dir }}/config.sh"
+
+    - name: Verificar se o runner ja foi registrado
+      ansible.builtin.stat:
+        path: "{{ runner_dir }}/.runner"
+      register: runner_registrado
+
+    - name: Exigir token apenas para registro inicial
+      ansible.builtin.assert:
+        that:
+          - "lookup('ansible.builtin.env', 
+            'RUNNER_REGISTRATION_TOKEN') | length > 0"
+        fail_msg: "Defina RUNNER_REGISTRATION_TOKEN na HOST antes de executar o playbook."
+        when: not runner_registrado.stat.exists
+    
+    - name: Registrar o runner no GitHub
+      ansible.builtin.command:
+        argv:
+          - ./config.sh
+          - --unattended
+          - --url
+          - "https://github.com/{{ github_repo }}"
+          - --token
+          - "{{ lookup('ansible.builtin.env',
+            'RUNNER_REGISTRATION_TOKEN') }}"
+          - --name
+          - "{{ runner_name }}"
+          - --labels
+          - datasci-ci
+          - --work
+          - _work
+          - --replace
+        chdir: "{{ runner_dir }}"
+        creates: "{{ runner_dir }}/.runner"
+      become_user: "{{ runner_user }}"
+      when: not runner_registrado.stat.exists
+      no_log: true
+
+    - name: Instalar runner como servico systemd
+      ansible.builtin.command:
+        argv:
+          - ./svc.sh
+          - install
+          - "{{ runner_user }}"
+        chdir: "{{ runner_dir }}"
+        creates: "{{ runner_dir }}/.service"
+
+    - name: Ler identificador do servico criado pelo GitHub
+      ansible.builtin.slurp:
+        src: "{{ runner_dir }}/.service"
+      register: nome_servico_runner
+      
+    - name: Habilitar e iniciar runner automaticamente
+      ansible.builtin.systemd_service:
+        name: "{{ nome_servico_runner.content | b64decode | trim }}"
+        enabled: true
+        state: started
+
+    - name: Verificar se usuario pipeline consegue executar Docker
+      ansible.builtin.command:
+        argv:
+          - docker
+          - ps
+      become_user: "{{ runner_user }}"
+      changed_when: false
